@@ -57,17 +57,31 @@ impl<T> Actor<T> {
     /// send to the actor a 'message' by manipulating the actor
     /// the raw actor type must be Send and 'static
     /// so that it can be used by multi thread
+    /// if the closure blocks, the worker coroutine would be suspended
+    /// and would consume all the worker coroutines so there would need
+    /// more coroutines to process the message
     pub fn call<F>(&self, f: F)
     where
         F: FnOnce(&mut T) + Send + 'static,
         T: Send + 'static,
     {
         let actor = self.raw.clone();
-        // coroutine::spawn(move || {
-        ACTOR_RUNNER.add(move || {
+        let f = move || {
             let mut g = actor.lock().unwrap();
             f(&mut g);
-        });
+        };
+
+        // TODO: expose the intenal queue size for the tx/rx for mpmc channel
+        let pending = 0;
+
+        // if there are too many actor messages need to process which means the worker
+        // coroutines are blcoked by the actor message processing internally
+        // don't use the runner, create a coroutine directly to process the message
+        if pending > 100 {
+            coroutine::spawn(f);
+        } else {
+            ACTOR_RUNNER.add(f);
+        }
     }
 
     /// view the actor internel states
