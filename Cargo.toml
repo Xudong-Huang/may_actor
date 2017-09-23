@@ -1,0 +1,7 @@
+[package]
+name = "may_actor"
+version = "0.1.0"
+authors = ["Xudong Huang <huangxu008@hotmail.com>"]
+
+[dependencies]
+may = { git = "ssh://git@gitlab.com/Xudong-Huang/may.git" }
