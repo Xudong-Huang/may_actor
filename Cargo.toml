@@ -5,3 +5,4 @@ authors = ["Xudong Huang <huangxu008@hotmail.com>"]
 
 [dependencies]
 may = { git = "ssh://git@gitlab.com/Xudong-Huang/may.git" }
+lazy_static = "0.2"
