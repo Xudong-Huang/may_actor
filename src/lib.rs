@@ -57,17 +57,24 @@ impl<T> Clone for Actor<T> {
 
 impl<T> Actor<T> {
     /// calc the offset of inner data and Actor
-    fn offset() -> usize {
-        use std::ops::Deref;
+    unsafe fn offset() -> usize {
+        static mut OFFSET: usize = 0;
 
-        // TODO: how to forget this invalid data to prevent the drop called?
-        let data: T = unsafe { ::std::mem::zeroed() };
-        let invalid = Actor::new(data);
-        let offset = {
-            let g = invalid.raw.lock().unwrap();
-            (g.deref() as *const T as usize) - (invalid.raw.deref() as *const Mutex<T> as usize)
-        };
-        offset
+        if OFFSET == 0 {
+            // for may::sync::Mutex, the offset is always 32 bytes (x64)
+            use std::ops::Deref;
+
+            let data: u8 = 0;
+            let invalid = Actor::new(data);
+            let offset = {
+                let g = invalid.raw.lock().unwrap();
+                (g.deref() as *const _ as usize) - (invalid.raw.deref() as *const _ as usize)
+            };
+
+            OFFSET = offset;
+        }
+
+        OFFSET
     }
 
     pub fn new(actor: T) -> Self {
@@ -87,7 +94,7 @@ impl<T> Actor<T> {
 
     /// send to the actor a 'message' by manipulating the actor
     /// the raw actor type must be Send and 'static
-    /// so that it can be used by multi thread
+    /// so that it can be used by multi threads
     /// if the closure blocks, the worker coroutine would be suspended
     /// and would consume all the worker coroutines so there would need
     /// more coroutines to process the message
