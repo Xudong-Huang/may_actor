@@ -49,9 +49,40 @@ pub struct Actor<T> {
     raw: Arc<Mutex<T>>,
 }
 
+impl<T> Clone for Actor<T> {
+    fn clone(&self) -> Self {
+        Actor { raw: self.raw.clone() }
+    }
+}
+
 impl<T> Actor<T> {
+    /// calc the offset of inner data and Actor
+    fn offset() -> usize {
+        use std::ops::Deref;
+
+        // TODO: how to forget this invalid data to prevent the drop called?
+        let data: T = unsafe { ::std::mem::zeroed() };
+        let invalid = Actor::new(data);
+        let offset = {
+            let g = invalid.raw.lock().unwrap();
+            (g.deref() as *const T as usize) - (invalid.raw.deref() as *const Mutex<T> as usize)
+        };
+        offset
+    }
+
     pub fn new(actor: T) -> Self {
         Actor { raw: Arc::new(Mutex::new(actor)) }
+    }
+
+    /// convert from innter ref to actor
+    /// only valid if &T is coming from an actor
+    pub unsafe fn from(inner: &T) -> Self {
+        // how to find the outer wrapper?
+        let m: *const Mutex<T> = ((inner as *const _ as usize) - Self::offset()) as *const _;
+        let arc = Arc::from_raw(m);
+        let ret = Actor { raw: arc.clone() };
+        ::std::mem::forget(arc);
+        ret
     }
 
     /// send to the actor a 'message' by manipulating the actor
@@ -94,7 +125,6 @@ impl<T> Actor<T> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +140,50 @@ mod tests {
         coroutine::sleep(::std::time::Duration::from_millis(10));
 
         a.view(|me| assert_eq!(*me, 6));
+    }
+
+    #[test]
+    fn ping_pong() {
+        struct Ping {
+            count: u32,
+        };
+        struct Pong {
+            count: u32,
+        };
+
+        impl Ping {
+            fn ping(&mut self, to: Actor<Pong>) {
+                if self.count > 10 {
+                    return;
+                }
+
+                println!("ping called");
+                self.count += 1;
+                let ping = unsafe { Actor::from(self) };
+                to.call(move |pong| { pong.pong(ping); });
+            }
+        }
+
+        impl Pong {
+            fn pong(&mut self, to: Actor<Ping>) {
+                println!("pong called");
+                self.count += 1;
+                let pong = unsafe { Actor::from(self) };
+                to.call(move |ping| { ping.ping(pong); })
+            }
+        }
+
+        let ping = Actor::new(Ping { count: 0 });
+        let pong = Actor::new(Pong { count: 0 });
+
+        {
+            let pong = pong.clone();
+            ping.call(move |me| { me.ping(pong); });
+        }
+
+        coroutine::sleep(::std::time::Duration::from_secs(1));
+
+        ping.view(|me| assert_eq!(me.count, 11));
+        pong.view(|me| assert_eq!(me.count, 11));
     }
 }
