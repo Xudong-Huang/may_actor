@@ -109,13 +109,11 @@ impl<T> Actor<T> {
             f(&mut g);
         };
 
-        // TODO: expose the intenal queue size for the tx/rx for mpmc channel
-        let pending = 0;
-
+        let pending = ACTOR_RUNNER.tx.pressure();
         // if there are too many actor messages need to process which means the worker
         // coroutines are blcoked by the actor message processing internally
         // don't use the runner, create a coroutine directly to process the message
-        if pending > 100 {
+        if pending > 10 {
             coroutine::spawn(f);
         } else {
             ACTOR_RUNNER.add(f);
