@@ -139,8 +139,8 @@ mod tests {
 
         let i = 0u32;
         let a = Actor::new(i);
-        a.call(|me| { *me += 2; });
-        a.call(|me| { *me += 4; });
+        a.call(|me| *me += 2);
+        a.call(|me| *me += 4);
         // sleep a while to let the actor process messages
         coroutine::sleep(::std::time::Duration::from_millis(10));
 
@@ -152,6 +152,7 @@ mod tests {
         struct Ping {
             count: u32,
         };
+
         struct Pong {
             count: u32,
         };
@@ -165,7 +166,7 @@ mod tests {
                 println!("ping called");
                 self.count += 1;
                 let ping = unsafe { Actor::from(self) };
-                to.call(move |pong| { pong.pong(ping); });
+                to.call(move |pong| pong.pong(ping));
             }
         }
 
@@ -174,7 +175,7 @@ mod tests {
                 println!("pong called");
                 self.count += 1;
                 let pong = unsafe { Actor::from(self) };
-                to.call(move |ping| { ping.ping(pong); })
+                to.call(|ping| ping.ping(pong))
             }
         }
 
@@ -183,7 +184,7 @@ mod tests {
 
         {
             let pong = pong.clone();
-            ping.call(move |me| { me.ping(pong); });
+            ping.call(|me| me.ping(pong));
         }
 
         coroutine::sleep(::std::time::Duration::from_secs(1));
