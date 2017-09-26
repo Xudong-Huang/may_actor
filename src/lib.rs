@@ -46,12 +46,12 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct Actor<T> {
-    raw: Arc<Mutex<T>>,
+    inner: Arc<Mutex<T>>,
 }
 
 impl<T> Clone for Actor<T> {
     fn clone(&self) -> Self {
-        Actor { raw: self.raw.clone() }
+        Actor { inner: self.inner.clone() }
     }
 }
 
@@ -67,8 +67,8 @@ impl<T> Actor<T> {
             let data: u8 = 0;
             let invalid = Actor::new(data);
             let offset = {
-                let g = invalid.raw.lock().unwrap();
-                (g.deref() as *const _ as usize) - (invalid.raw.deref() as *const _ as usize)
+                let g = invalid.inner.lock().unwrap();
+                (g.deref() as *const _ as usize) - (invalid.inner.deref() as *const _ as usize)
             };
 
             OFFSET = offset;
@@ -78,7 +78,7 @@ impl<T> Actor<T> {
     }
 
     pub fn new(actor: T) -> Self {
-        Actor { raw: Arc::new(Mutex::new(actor)) }
+        Actor { inner: Arc::new(Mutex::new(actor)) }
     }
 
     /// convert from innter ref to actor
@@ -87,7 +87,7 @@ impl<T> Actor<T> {
         // how to find the outer wrapper?
         let m: *const Mutex<T> = ((inner as *const _ as usize) - Self::offset()) as *const _;
         let arc = Arc::from_raw(m);
-        let ret = Actor { raw: arc.clone() };
+        let ret = Actor { inner: arc.clone() };
         ::std::mem::forget(arc);
         ret
     }
@@ -103,7 +103,7 @@ impl<T> Actor<T> {
         F: FnOnce(&mut T) + Send + 'static,
         T: Send + 'static,
     {
-        let actor = self.raw.clone();
+        let actor = self.inner.clone();
         let f = move || {
             let mut g = actor.lock().unwrap();
             f(&mut g);
@@ -113,7 +113,7 @@ impl<T> Actor<T> {
         // if there are too many actor messages need to process which means the worker
         // coroutines are blcoked by the actor message processing internally
         // don't use the runner, create a coroutine directly to process the message
-        if pending > 10 {
+        if pending > 100 {
             coroutine::spawn(f);
         } else {
             ACTOR_RUNNER.add(f);
@@ -125,7 +125,7 @@ impl<T> Actor<T> {
     where
         F: FnOnce(&T),
     {
-        let g = self.raw.lock().unwrap();
+        let g = self.inner.lock().unwrap();
         f(&g)
     }
 }
