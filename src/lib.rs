@@ -1,10 +1,9 @@
 extern crate may;
-#[macro_use]
-extern crate lazy_static;
 
 use std::sync::Arc;
+use std::cell::UnsafeCell;
 use may::coroutine;
-use may::sync::{Mutex, mpmc};
+use may::sync::mpsc;
 
 #[doc(hidden)]
 trait FnBox: Send {
@@ -18,35 +17,41 @@ impl<F: FnOnce() + Send> FnBox for F {
 }
 
 #[derive(Debug)]
-pub struct ActorRunner {
-    tx: mpmc::Sender<Box<FnBox>>,
+pub struct ActorImpl<T> {
+    data: UnsafeCell<T>,
+    tx: mpsc::Sender<Box<FnBox>>,
 }
 
-impl ActorRunner {
-    fn new(workers: u32) -> Self {
-        let (tx, rx) = mpmc::channel::<Box<FnBox>>();
-        for _ in 0..workers {
-            let rx = rx.clone();
-            coroutine::spawn(move || for f in rx.into_iter() {
-                f.call_box();
-            });
+unsafe impl<T: Send> Sync for ActorImpl<T> {}
+
+impl<T> ActorImpl<T> {
+    fn new(data: T) -> Self {
+        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
+
+        // when all tx are dropped, the coroutine would exit
+        coroutine::spawn(move || for f in rx.into_iter() {
+            f.call_box();
+        });
+
+        ActorImpl {
+            data: UnsafeCell::new(data),
+            tx: tx,
         }
-
-        ActorRunner { tx: tx }
     }
 
-    pub fn add<F: FnOnce() + Send + 'static>(&self, f: F) {
-        self.tx.send(Box::new(f)).unwrap();
+    fn get_mut(&self) -> &mut T {
+        unsafe { &mut *self.data.get() }
     }
-}
 
-lazy_static! {
-    pub static ref ACTOR_RUNNER: ActorRunner = ActorRunner::new(100);
+
+    fn get_ref(&self) -> &T {
+        unsafe { &*self.data.get() }
+    }
 }
 
 #[derive(Debug)]
 pub struct Actor<T> {
-    inner: Arc<Mutex<T>>,
+    inner: Arc<ActorImpl<T>>,
 }
 
 impl<T> Clone for Actor<T> {
@@ -56,36 +61,15 @@ impl<T> Clone for Actor<T> {
 }
 
 impl<T> Actor<T> {
-    /// calc the offset of inner data and Actor
-    unsafe fn offset() -> usize {
-        static mut OFFSET: usize = 0;
-
-        if OFFSET == 0 {
-            // for may::sync::Mutex, the offset is always 32 bytes (x64)
-            use std::ops::Deref;
-
-            let data: u8 = 0;
-            let invalid = Actor::new(data);
-            let offset = {
-                let g = invalid.inner.lock().unwrap();
-                (g.deref() as *const _ as usize) - (invalid.inner.deref() as *const _ as usize)
-            };
-
-            OFFSET = offset;
-        }
-
-        OFFSET
-    }
-
     pub fn new(actor: T) -> Self {
-        Actor { inner: Arc::new(Mutex::new(actor)) }
+        Actor { inner: Arc::new(ActorImpl::new(actor)) }
     }
 
     /// convert from innter ref to actor
     /// only valid if &T is coming from an actor
     pub unsafe fn from(inner: &T) -> Self {
         // how to find the outer wrapper?
-        let m: *const Mutex<T> = ((inner as *const _ as usize) - Self::offset()) as *const _;
+        let m: *const ActorImpl<T> = (inner as *const _ as usize) as *const _;
         let arc = Arc::from_raw(m);
         let ret = Actor { inner: arc.clone() };
         ::std::mem::forget(arc);
@@ -95,9 +79,7 @@ impl<T> Actor<T> {
     /// send to the actor a 'message' by manipulating the actor
     /// the raw actor type must be Send and 'static
     /// so that it can be used by multi threads
-    /// if the closure blocks, the worker coroutine would be suspended
-    /// and would consume all the worker coroutines so there would need
-    /// more coroutines to process the message
+    /// the closure would be executed asynchronously
     pub fn call<F>(&self, f: F)
     where
         F: FnOnce(&mut T) + Send + 'static,
@@ -105,28 +87,46 @@ impl<T> Actor<T> {
     {
         let actor = self.inner.clone();
         let f = move || {
-            let mut g = actor.lock().unwrap();
-            f(&mut g);
+            let data = actor.get_mut();
+            f(data);
         };
 
-        let pending = ACTOR_RUNNER.tx.pressure();
-        // if there are too many actor messages need to process which means the worker
-        // coroutines are blcoked by the actor message processing internally
-        // don't use the runner, create a coroutine directly to process the message
-        if pending > 100 {
-            coroutine::spawn(f);
-        } else {
-            ACTOR_RUNNER.add(f);
-        }
+        self.inner.tx.send(Box::new(f)).unwrap();
     }
 
     /// view the actor internel states
+    /// this function would block until the view done
     pub fn view<F>(&self, f: F)
     where
         F: FnOnce(&T),
     {
-        let g = self.inner.lock().unwrap();
-        f(&g)
+        use may::sync::Blocker;
+
+        let blocker = Blocker::current();
+        let (tx, rx) = mpsc::channel();
+
+        {
+            let blocker = blocker.clone();
+
+            // this is only a blocker that hold the message processing
+            let viewer = move || {
+                // signal the viewer to start processing
+                blocker.unpark();
+                // wait until the viewer processing done
+                let _ = rx.recv().unwrap();
+            };
+
+            self.inner.tx.send(Box::new(viewer)).unwrap();
+        }
+
+        // wait until the viewer pause the message processing
+        blocker.park(None).unwrap();
+
+        let data = self.inner.get_ref();
+        f(data);
+
+        // after view the data, unblock the message processing
+        tx.send(()).unwrap();
     }
 }
 
@@ -141,9 +141,7 @@ mod tests {
         let a = Actor::new(i);
         a.call(|me| *me += 2);
         a.call(|me| *me += 4);
-        // sleep a while to let the actor process messages
-        coroutine::sleep(::std::time::Duration::from_millis(10));
-
+        // the view would wait previous messages process done
         a.view(|me| assert_eq!(*me, 6));
     }
 
@@ -151,6 +149,7 @@ mod tests {
     fn ping_pong() {
         struct Ping {
             count: u32,
+            tx: mpsc::Sender<()>,
         };
 
         struct Pong {
@@ -160,10 +159,11 @@ mod tests {
         impl Ping {
             fn ping(&mut self, to: Actor<Pong>) {
                 if self.count > 10 {
+                    self.tx.send(()).unwrap();
                     return;
                 }
 
-                println!("ping called");
+                println!("ping called, count={}", self.count);
                 self.count += 1;
                 let ping = unsafe { Actor::from(self) };
                 to.call(move |pong| pong.pong(ping));
@@ -172,14 +172,16 @@ mod tests {
 
         impl Pong {
             fn pong(&mut self, to: Actor<Ping>) {
-                println!("pong called");
+                println!("pong called, count={}", self.count);
                 self.count += 1;
                 let pong = unsafe { Actor::from(self) };
                 to.call(|ping| ping.ping(pong))
             }
         }
 
-        let ping = Actor::new(Ping { count: 0 });
+        let (tx, rx) = mpsc::channel();
+
+        let ping = Actor::new(Ping { count: 0, tx: tx });
         let pong = Actor::new(Pong { count: 0 });
 
         {
@@ -187,7 +189,8 @@ mod tests {
             ping.call(|me| me.ping(pong));
         }
 
-        coroutine::sleep(::std::time::Duration::from_secs(1));
+        // wait the message process finish
+        rx.recv().unwrap();
 
         ping.view(|me| assert_eq!(me.count, 11));
         pong.view(|me| assert_eq!(me.count, 11));
