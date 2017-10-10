@@ -2,6 +2,7 @@ extern crate may;
 
 use std::sync::Arc;
 use std::cell::UnsafeCell;
+use std::panic::{self, RefUnwindSafe};
 use may::coroutine;
 use may::sync::mpsc;
 
@@ -23,14 +24,28 @@ struct ActorImpl<T> {
 }
 
 unsafe impl<T: Send> Sync for ActorImpl<T> {}
+impl<T> RefUnwindSafe for ActorImpl<T> {}
 
 impl<T> ActorImpl<T> {
     fn new(data: T) -> Self {
-        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
+        // need to transfer to the raw trait object so that we don't need the UnwindSafe bound
+        // we can use std::raw::TraitObject, but it is nightly only
+        #[repr(C)]
+        struct TraitObject {
+            pub data: *mut (),
+            pub vtable: *mut (),
+        }
 
+        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
         // when all tx are dropped, the coroutine would exit
         coroutine::spawn(move || for f in rx.into_iter() {
-            f.call_box();
+            // ignore the panic if it happened
+            let f: TraitObject = unsafe { std::mem::transmute(Box::into_raw(f)) };
+            panic::catch_unwind(move || {
+                let f: *mut FnBox = unsafe { std::mem::transmute(f) };
+                let f = unsafe { Box::from_raw(f) };
+                f.call_box();
+            }).ok();
         });
 
         ActorImpl {
@@ -140,6 +155,7 @@ mod tests {
         let i = 0u32;
         let a = Actor::new(i);
         a.call(|me| *me += 2);
+        a.call(|_me| panic!("support panic inside"));
         a.call(|me| *me += 4);
         // the view would wait previous messages process done
         a.view(|me| assert_eq!(*me, 6));
