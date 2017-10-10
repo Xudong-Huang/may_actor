@@ -17,7 +17,7 @@ impl<F: FnOnce() + Send> FnBox for F {
 }
 
 #[derive(Debug)]
-pub struct ActorImpl<T> {
+struct ActorImpl<T> {
     data: UnsafeCell<T>,
     tx: mpsc::Sender<Box<FnBox>>,
 }
