@@ -67,23 +67,18 @@ fn pi_actor() -> f64 {
     impl Master {
         fn start(&self) {
             // create the worker actors
-            let mut workers = vec![];
+            let mut workers = Vec::with_capacity(ACTOR_NUMBER);
             for _ in 0..ACTOR_NUMBER {
                 workers.push(Actor::new(Worker));
             }
 
             // send work load to workers
             let mut start = 0;
-            let mut idx = 0;
-            for _ in 0..WORKS {
+            for i in 0..WORKS {
                 let end = start + WORK_LOAD;
                 let master = unsafe { Actor::from(self) };
-                workers[idx].call(move |me| me.work(master, start, end));
+                workers[i % ACTOR_NUMBER].call(move |me| me.work(master, start, end));
                 start = end;
-                idx += 1;
-                if idx == ACTOR_NUMBER {
-                    idx = 0;
-                }
             }
         }
 
