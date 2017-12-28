@@ -1,6 +1,6 @@
-# may_acotr
+# may_actor
 
-rust native actor library based on [may]()
+rust native actor library based on [may](https://github.com/Xudong-Huang/may)
 
 
 ## Usage
@@ -29,3 +29,14 @@ for a detailed example, please see [pi.rs](examples/pi.rs)
 - [x] view internal actor state via closure (`Actor.view()`)
 - [x] convert from raw instance reference to Actor (`Actor.from()`)
 - [x] allow panic inside a closure message
+
+## Notice
+
+This simple library doesn't support spawn actors across processes
+
+## License
+
+`may_actor` is licensed under either of the following, at your option:
+
+ * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
