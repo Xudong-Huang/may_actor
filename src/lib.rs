@@ -1,3 +1,25 @@
+//! # may_actor
+//!
+//! rust native actor library based on [may](https://github.com/Xudong-Huang/may)
+//!
+//! ## Features
+//!
+//! - send message via closure ([`Actor.call`])
+//! - view internal actor state via closure ([`Actor.view`])
+//! - convert from raw instance reference to Actor ([`Actor.from`])
+//! - allow panic inside a closure message
+//!
+//! ## Notice
+//!
+//! This simple library doesn't support spawn actors across processes
+//!
+//! [`Actor.call`]: ./struct.Actor.html#method.call
+//! [`Actor.view`]: ./struct.Actor.html#method.view
+//! [`Actor.from`]: ./struct.Actor.html#method.from
+//!
+#![deny(missing_docs)]
+
+#[doc(hidden)]
 #[macro_use]
 extern crate may;
 
@@ -66,6 +88,24 @@ impl<T> ActorImpl<T> {
     }
 }
 
+/// coroutine based Actor.
+///
+/// The type `Actor<T>` wraps `T` into an Actor.
+/// You can send messages to the actor by calling it's [`call`] method.
+/// You can view the actor internal state by calling it's [`view`] method.
+/// 
+/// # Examples
+///
+/// ```
+/// use may_actor::Actor;
+///
+/// let a = Actor::new(40);
+/// a.call(|me| *me += 2);
+/// a.view(|me| assert_eq!(*me, 42));
+/// ```
+///
+/// [`call`]: ./struct.Actor.html#method.call
+/// [`view`]: ./struct.Actor.html#method.view
 #[derive(Debug)]
 pub struct Actor<T> {
     inner: Arc<ActorImpl<T>>,
@@ -78,12 +118,16 @@ impl<T> Clone for Actor<T> {
 }
 
 impl<T> Actor<T> {
+    /// create an actor by consuming the actual actor implementation
     pub fn new(actor: T) -> Self {
         Actor { inner: Arc::new(ActorImpl::new(actor)) }
     }
 
-    /// convert from innter ref to actor
-    /// only valid if &T is coming from an actor
+    /// convert from inner ref to actor
+    ///
+    /// ## Safety
+    /// only valid if `&T`is coming from an actor.
+    /// normally this is used to convert `&self` to `Actor<T>`
     pub unsafe fn from(inner: &T) -> Self {
         // how to find the outer wrapper?
         let m: *const ActorImpl<T> = (inner as *const _ as usize) as *const _;
@@ -93,9 +137,14 @@ impl<T> Actor<T> {
         ret
     }
 
-    /// send to the actor a 'message' by manipulating the actor
-    /// the raw actor type must be Send and 'static
-    /// so that it can be used by multi threads
+    /// send the actor a 'message' by a closure.
+    ///
+    /// the closure would get the `&mut T` as parameter,
+    /// so that you can manipulate its internal state.
+    ///
+    /// the raw actor type must be `Send` and `'static`
+    /// so that it can be used by multi threads.
+    ///
     /// the closure would be executed asynchronously
     pub fn call<F>(&self, f: F)
     where
@@ -111,7 +160,11 @@ impl<T> Actor<T> {
         self.inner.tx.send(Box::new(f)).unwrap();
     }
 
-    /// view the actor internel states
+    /// view the actor internal states by a closure.
+    ///
+    /// the closure would get a `&T` as parameter,
+    /// so that you can access its internal state but not change it.
+    ///
     /// this function would block until the view done
     pub fn view<F>(&self, f: F)
     where
