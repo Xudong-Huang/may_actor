@@ -1,7 +1,7 @@
+#[macro_use]
 extern crate may;
 extern crate may_actor;
 
-use may::coroutine;
 use may::sync::mpsc;
 use may_actor::Actor;
 
@@ -35,7 +35,7 @@ fn pi_coroutine() -> f64 {
     for _ in 0..works {
         let tx = tx.clone();
         let end = start + WORK_LOAD;
-        coroutine::spawn(move || tx.send(calc_work(start, end)).unwrap());
+        go!(move || tx.send(calc_work(start, end)).unwrap());
         start = end;
     }
 

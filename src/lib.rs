@@ -1,9 +1,9 @@
+#[macro_use]
 extern crate may;
 
 use std::sync::Arc;
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
-use may::coroutine;
 use may::sync::mpsc;
 
 #[doc(hidden)]
@@ -17,6 +17,8 @@ impl<F: FnOnce() + Send> FnBox for F {
     }
 }
 
+// we must use repr(C) to fix the mem layout
+#[repr(C)]
 #[derive(Debug)]
 struct ActorImpl<T> {
     data: UnsafeCell<T>,
@@ -38,7 +40,7 @@ impl<T> ActorImpl<T> {
 
         let (tx, rx) = mpsc::channel::<Box<FnBox>>();
         // when all tx are dropped, the coroutine would exit
-        coroutine::spawn(move || for f in rx.into_iter() {
+        go!(move || for f in rx.into_iter() {
             // ignore the panic if it happened
             let f: TraitObject = unsafe { std::mem::transmute(Box::into_raw(f)) };
             panic::catch_unwind(move || {
@@ -87,7 +89,7 @@ impl<T> Actor<T> {
         let m: *const ActorImpl<T> = (inner as *const _ as usize) as *const _;
         let arc = Arc::from_raw(m);
         let ret = Actor { inner: arc.clone() };
-        ::std::mem::forget(arc);
+        std::mem::forget(arc);
         ret
     }
 
