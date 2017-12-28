@@ -2,6 +2,20 @@
 name = "may_actor"
 version = "0.1.0"
 authors = ["Xudong Huang <huangxu008@hotmail.com>"]
+license = "MIT/Apache-2.0"
+repository = "https://github.com/Xudong-Huang/may_actor.git"
+homepage = "https://github.com/Xudong-Huang/may_actor.git"
+documentation = "https://docs.rs/may_actor"
+description = "Simple Actor library based on MAY"
+readme = "README.md"
+keywords = ["actor", "coroutine", "multi-thread"]
+categories = ["concurrency"]
+exclude = [
+    ".gitignore",
+    ".travis.yml",
+    "appveyor.yml",
+    "benches/**/*",
+]
 
 [dependencies]
 may = { git = "https://github.com/Xudong-Huang/may.git" }
