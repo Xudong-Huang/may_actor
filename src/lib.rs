@@ -82,7 +82,6 @@ impl<T> ActorImpl<T> {
         unsafe { &mut *self.data.get() }
     }
 
-
     fn get_ref(&self) -> &T {
         unsafe { &*self.data.get() }
     }
@@ -93,7 +92,7 @@ impl<T> ActorImpl<T> {
 /// The type `Actor<T>` wraps `T` into an Actor.
 /// You can send messages to the actor by calling it's [`call`] method.
 /// You can view the actor internal state by calling it's [`view`] method.
-/// 
+///
 /// # Examples
 ///
 /// ```
@@ -113,14 +112,18 @@ pub struct Actor<T> {
 
 impl<T> Clone for Actor<T> {
     fn clone(&self) -> Self {
-        Actor { inner: self.inner.clone() }
+        Actor {
+            inner: self.inner.clone(),
+        }
     }
 }
 
 impl<T> Actor<T> {
     /// create an actor by consuming the actual actor implementation
     pub fn new(actor: T) -> Self {
-        Actor { inner: Arc::new(ActorImpl::new(actor)) }
+        Actor {
+            inner: Arc::new(ActorImpl::new(actor)),
+        }
     }
 
     /// convert from inner ref to actor
@@ -206,7 +209,6 @@ mod tests {
 
     #[test]
     fn it_works() {
-
         let i = 0u32;
         let a = Actor::new(i);
         a.call(|me| *me += 2);
