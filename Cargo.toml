@@ -18,4 +18,5 @@ exclude = [
 ]
 
 [dependencies]
-may = { git = "https://github.com/Xudong-Huang/may.git" }
+#may = { git = "https://github.com/Xudong-Huang/may.git" }
+may = "0.2"
