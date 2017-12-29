@@ -1,6 +1,5 @@
 [![Build Status](https://travis-ci.org/Xudong-Huang/may_actor.svg?branch=master)](https://travis-ci.org/Xudong-Huang/may_actor)
-[![Build status](https://ci.appveyor.com/api/projects/status/7gv4kw3b0m0y1iy6/branch/master?svg=true)](https://ci.appveyor.com/project/Xudong-Huang/may_actor/branch
-/master)
+[![Build status](https://ci.appveyor.com/api/projects/status/5c0tbe3yaijpxxi3/branch/master?svg=true)](https://ci.appveyor.com/project/Xudong-Huang/may-actor/branch/master)
 [![Current Crates.io Version](https://img.shields.io/crates/v/may_actor.svg)](https://crates.io/crates/may_actor)
 [![Document](https://img.shields.io/badge/doc-may_actor-green.svg)](https://docs.rs/may_actor)
 
