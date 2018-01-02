@@ -34,17 +34,19 @@ for a detailed example, please see [pi.rs](examples/pi.rs)
 
 ## Features
 
-- send message via closure (`Actor.call()`)
+- send message via closure (`Actor.call`)
 
-You send message to the actor with the call API. It accepts a closure that have the &mut T as parameter. So that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure by a coroutine that associate with it. This API would not block user’s execution and would return immediately.
+You send message to the actor with the `call` API. It accepts a closure that have the `&mut T` as parameter. So that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure by a coroutine that associate with it. This API would not block user’s execution and would return immediately.
 
-- view internal actor state via closure (`Actor.view()`)
+- view internal actor state via closure (`Actor.view`)
 
-You can also view the actor internal state by the view API. It accepts a closure that have the &T as parameter, so that you can access the state without modify permission. The closure would be executed by the associated coroutine if there are no other pending messages need to process. And it will block until the closure returns. So during the view stage, you are guaranteed that no others are modifying the actor.
+You can also view the actor internal state by the `view` API. It accepts a closure that have the `&T` as parameter, so that you can access the state without modify permission. The closure would be executed by the associated coroutine if there are no other pending messages need to process. And it will block until the closure returns. So during the view stage, you are guaranteed that no others are modifying the actor.
 
-- convert from raw instance reference to Actor (`Actor.from()`)
+- convert from raw instance reference to Actor (`Actor.from`)
 
-You can transmute a &self type unsafely to actor handle Actor<T>. This is convenient when you need to get the actual handle that need to passed to other actors in your implementations.
+You can transmute a &self type unsafely to actor handle Actor<T>. This is convenient when you need to get the actor handle that need to passed to other actors in your implementations.
+
+However transmute from non actor context would trigger undefined behavior.
 
 - Allow panic inside a closure message, and this would not kill the actor, the actor could process successive messages.
 
