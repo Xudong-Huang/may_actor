@@ -6,11 +6,12 @@
 
 # may_actor
 
-rust native actor library based on [may](https://github.com/Xudong-Huang/may)
+rust native actor library based on [may][may]
 
 with this library
 * you don’t need to declare messages that passed into the actor
 * you don’t have to implement “actor” interface or trait for your actor.
+* the actors will automatically have M:N scheduling powered by [may][may]
 
 ## Usage
 ```rust
@@ -53,8 +54,9 @@ However transmute from non actor context would trigger undefined behavior.
 - The actor can be cloned to get a new handle, this is just like how `Arc<T>` works, if all the actor handle got dropped, the associated coroutine will automatically exit.
 
 ## Notice
-
-This simple library doesn't support spawn actors across processes
+* the actor will catch the panic when processing a message panics, so there is no supervisor and restart policy right now, the actor will terminate if all handles are dropped by user  
+* Don't call thread block APIs in passed in closures, call [May][may] version APIs instead.
+* This simple library doesn't support spawn actors across processes
 
 ## License
 
@@ -62,3 +64,6 @@ This simple library doesn't support spawn actors across processes
 
  * Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
  * MIT License ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+<!--refs-->
+[may]:https://github.com/Xudong-Huang/may
