@@ -37,24 +37,24 @@ for a detailed example, please see [pi.rs](examples/pi.rs)
 
 - send message via closure (`Actor.call`)
 
-You send message to the actor with the `call` API. It accepts a closure that have the `&mut T` as parameter. So that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure by a coroutine that associate with it. This API would not block user’s execution and would return immediately.
+You can send messages to the actor with the `call` API. It accepts a closure that has the `&mut T` as parameter, so that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure by a coroutine that associate with it. This API would not block user’s execution and would return immediately.
 
-- view internal actor state via closure (`Actor.view`)
+- view actor internal state via closure (`Actor.view`)
 
-You can also view the actor internal state by the `view` API. It accepts a closure that have the `&T` as parameter, so that you can access the state without modify permission. The closure would be executed by the associated coroutine if there are no other pending messages need to process. And it will block until the closure returns. So during the view stage, you are guaranteed that no others are modifying the actor.
+You can also view the actor's internal state by the `view` API. It accepts a closure that has the `&T` as parameter, so that you can access the state without modify permission. The closure would be executed by the associated coroutine if there are no other pending messages. And it will block until the closure returns. So during the view stage, you are guaranteed that no others are modifying the actor.
 
 - convert from raw instance reference to Actor (`Actor.from`)
 
-You can transmute a &self type unsafely to actor handle Actor<T>. This is convenient when you need to get the actor handle that need to passed to other actors in your implementations.
+You can transmute a &self type unsafely to it's handle type `Actor<T>`. This is convenient when need to get an actor handle in the implementation that need to pass as a function parameter.
 
 However transmute from non actor context would trigger undefined behavior.
 
-- Allow panic inside a closure message, and this would not kill the actor, the actor could process successive messages.
+- Allow panic inside a closure message, and this would not kill the actor, the actor will continue to process successive messages.
 
 - The actor can be cloned to get a new handle, this is just like how `Arc<T>` works, if all the actor handle got dropped, the associated coroutine will automatically exit.
 
 ## Notice
-* the actor will catch the panic when processing a message panics, so there is no supervisor and restart policy right now, the actor will terminate if all handles are dropped by user  
+* Actor will catch panic and ignore the panic if any happened when processing a message, so there is no supervisor and restart policy right now. The actor only exit if all handles are dropped by user.
 * Don't call thread block APIs in passed in closures, call [May][may] version APIs instead.
 * This simple library doesn't support spawn actors across processes
 
