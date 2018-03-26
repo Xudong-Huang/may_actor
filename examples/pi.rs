@@ -10,7 +10,11 @@ const WORK_LOAD: usize = 10000;
 const ACTOR_NUMBER: usize = 100;
 
 fn pow_of_minus_one(pow: usize) -> f64 {
-    if pow & 1 != 0 { -1.0 } else { 1.0 }
+    if pow & 1 != 0 {
+        -1.0
+    } else {
+        1.0
+    }
 }
 
 fn calc_work(start: usize, end: usize) -> f64 {
