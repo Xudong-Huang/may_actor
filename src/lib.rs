@@ -23,10 +23,12 @@
 #[macro_use]
 extern crate may;
 
-use std::sync::Arc;
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
+use std::sync::{Arc, Weak};
+
 use may::sync::mpsc;
+use may::sync::Blocker;
 
 #[doc(hidden)]
 trait FnBox: Send {
@@ -98,6 +100,8 @@ pub struct Actor<T> {
     inner: Arc<ActorImpl<T>>,
 }
 
+unsafe impl<T> Send for Actor<T> {}
+
 impl<T> Clone for Actor<T> {
     fn clone(&self) -> Self {
         Actor {
@@ -112,6 +116,43 @@ impl<T> Actor<T> {
         Actor {
             inner: Arc::new(ActorImpl::new(actor)),
         }
+    }
+
+    /// create an actor with a driver coroutine running in backgroud
+    /// when all actor instances got dropped, the driver coroutine
+    /// would be cancelled
+    pub fn drive_new<F>(data: T, f: F) -> Self
+    where
+        F: FnOnce(DriverActor<T>) + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
+
+        let actor = Actor {
+            inner: Arc::new(ActorImpl {
+                data: UnsafeCell::new(data),
+                tx: tx,
+            }),
+        };
+
+        // create the back groud driver
+        let driver_para = Arc::downgrade(&actor.inner);
+        let driver = go!(|| f(DriverActor { inner: driver_para }));
+
+        // when all tx are dropped, the coroutine would exit
+        go!(move || {
+            for f in rx.into_iter() {
+                panic::catch_unwind(panic::AssertUnwindSafe(move || {
+                    f.call_box();
+                })).ok();
+            }
+            // when all the actor instances dropped, cancel the driver
+            unsafe { driver.coroutine().cancel() };
+            driver.join().ok();
+            println!("actor coroutine done");
+        });
+
+        actor
     }
 
     /// convert from inner ref to actor
@@ -161,8 +202,6 @@ impl<T> Actor<T> {
     where
         F: FnOnce(&T),
     {
-        use may::sync::Blocker;
-
         let blocker = Blocker::current();
         let (tx, rx) = mpsc::channel();
 
@@ -188,6 +227,43 @@ impl<T> Actor<T> {
 
         // after view the data, unblock the message processing
         tx.send(()).unwrap();
+    }
+}
+
+/// parameter used in driver coroutine function
+#[derive(Debug)]
+pub struct DriverActor<T> {
+    // hold a weak pointer
+    // so that have chance to clean up
+    inner: Weak<ActorImpl<T>>,
+}
+
+impl<T> DriverActor<T> {
+    /// same as Actor.call
+    pub fn call<F>(&self, f: F)
+    where
+        F: FnOnce(&mut T) + Send + 'static,
+        T: Send + 'static,
+    {
+        // if the actor is gone, cancel the current coroutine
+        let actor = match self.inner.upgrade() {
+            None => may::coroutine::trigger_cancel_panic(),
+            Some(inner) => Actor { inner },
+        };
+        actor.call(f);
+    }
+
+    /// same as Actor.view
+    pub fn view<F>(&self, f: F)
+    where
+        F: FnOnce(&T),
+    {
+        // if the actor is gone, cancel the current coroutine
+        let actor = match self.inner.upgrade() {
+            None => may::coroutine::trigger_cancel_panic(),
+            Some(inner) => Actor { inner },
+        };
+        actor.view(f);
     }
 }
 
@@ -255,5 +331,41 @@ mod tests {
 
         ping.view(|me| assert_eq!(me.count, 11));
         pong.view(|me| assert_eq!(me.count, 11));
+    }
+
+    #[test]
+    fn driver_actor() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+
+        #[derive(Debug)]
+        struct DropFlag {
+            flag: Arc<AtomicBool>,
+        }
+
+        impl Drop for DropFlag {
+            fn drop(&mut self) {
+                self.flag.store(true, Ordering::Relaxed);
+            }
+        }
+
+        let flag = Arc::new(AtomicBool::new(false));
+
+        let drop_flag = DropFlag { flag: flag.clone() };
+
+        let actor = Actor::drive_new(0, move |me| loop {
+            me.call(|v| {
+                *v += 1;
+                println!("new_value = {}", *v)
+            });
+            assert_eq!(drop_flag.flag.load(Ordering::Relaxed), false);
+            may::coroutine::sleep(Duration::from_secs(1));
+        });
+
+        may::coroutine::sleep(Duration::from_secs(3));
+        drop(actor);
+        // wait some time for the driver coroutine exit
+        may::coroutine::sleep(Duration::from_millis(100));
+        assert_eq!(flag.load(Ordering::Relaxed), true);
     }
 }
