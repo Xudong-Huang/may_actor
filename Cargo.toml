@@ -1,6 +1,6 @@
 [package]
 name = "may_actor"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Xudong Huang <huangxu008@hotmail.com>"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/Xudong-Huang/may_actor.git"
@@ -18,5 +18,4 @@ exclude = [
 ]
 
 [dependencies]
-#may = { git = "https://github.com/Xudong-Huang/may.git" }
-may = "0.2"
+may = "0.3"
