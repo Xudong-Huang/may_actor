@@ -23,15 +23,12 @@
 #[macro_use]
 extern crate may;
 
-#[doc(hidden)]
-extern crate may_waiter;
-
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 
-use may::sync::mpsc;
-use may_waiter::Waiter;
+use may::sync::{mpsc, AtomicOption, Blocker};
 
 #[doc(hidden)]
 trait FnBox: Send {
@@ -200,25 +197,53 @@ impl<T> Actor<T> {
     /// You can use this method to monitor the internal state
     pub fn with<R, F>(&self, f: F) -> R
     where
-        F: FnOnce(&mut T) -> R + Send + 'static,
-        T: Send + 'static,
-        R: Send + 'static,
+        F: FnOnce(&mut T) -> R + Send,
+        T: Send,
+        R: Send,
     {
-        let waiter = Arc::new(Waiter::new());
+        let blocker = Blocker::current();
+        let ret = Arc::new(AtomicOption::none());
+        let err = Arc::new(AtomicOption::none());
+
         {
-            let waiter = waiter.clone();
+            let ret = ret.clone();
+            let err = err.clone();
+            let blocker = blocker.clone();
             let actor = self.inner.clone();
+
             let f = move || {
-                let data = actor.get_mut();
-                // signal the caller to after processing
-                waiter.set_rsp(f(data))
+                let exit = panic::catch_unwind(panic::AssertUnwindSafe(|| f(actor.get_mut())));
+                match exit {
+                    Ok(r) => {
+                        ret.swap(r, Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        err.swap(e, Ordering::Relaxed);
+                    }
+                }
+                blocker.unpark();
             };
 
-            self.inner.tx.send(Box::new(f)).unwrap();
+            let closure: Box<FnBox> = Box::new(f);
+            // erase the lifetime of boxed closure
+            let closure: Box<FnBox + 'static> = unsafe { std::mem::transmute(closure) };
+
+            self.inner.tx.send(closure).unwrap();
         }
 
         // wait until the viewer pause the message processing
-        waiter.wait_rsp(None).unwrap()
+        match blocker.park(None) {
+            Ok(_) => match ret.take(Ordering::Relaxed) {
+                Some(v) => v,
+                None => match err.take(Ordering::Relaxed) {
+                    Some(panic) => panic::resume_unwind(panic),
+                    None => unreachable!("failed to get result"),
+                },
+            },
+            // impossible be a timeout err
+            // cancel happened, we do nothing here
+            Err(_) => may::coroutine::trigger_cancel_panic(),
+        }
     }
 }
 
@@ -248,9 +273,9 @@ impl<T> DriverActor<T> {
     /// same as Actor.with
     pub fn with<R, F>(&self, f: F)
     where
-        F: FnOnce(&mut T) -> R + Send + 'static,
-        T: Send + 'static,
-        R: Send + 'static,
+        F: FnOnce(&mut T) -> R + Send,
+        T: Send,
+        R: Send,
     {
         // if the actor is gone, cancel the current coroutine
         let actor = match self.inner.upgrade() {
@@ -361,5 +386,24 @@ mod tests {
         // wait some time for the driver coroutine exit
         may::coroutine::sleep(Duration::from_millis(100));
         assert_eq!(flag.load(Ordering::Relaxed), true);
+    }
+
+    #[test]
+    fn with_test() {
+        let mut i = 100;
+        let a = Actor::new(0);
+        let v = a.with(|me| {
+            *me += 2;
+            i += *me;
+            *me
+        });
+        assert_eq!(100 + v, i);
+    }
+
+    #[test]
+    #[should_panic]
+    fn with_panic() {
+        let a = Actor::new(0);
+        a.with(|_| panic!("painic inside"));
     }
 }

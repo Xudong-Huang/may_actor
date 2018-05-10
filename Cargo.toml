@@ -19,4 +19,3 @@ exclude = [
 
 [dependencies]
 may = "0.3"
-may_waiter = "0.1"
