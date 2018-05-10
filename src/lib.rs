@@ -4,8 +4,8 @@
 //!
 //! ## Features
 //!
-//! - send message via closure ([`Actor.call`])
-//! - view internal actor state via closure ([`Actor.view`])
+//! - run closure asynchronously by send message ([`Actor.call`])
+//! - run closure synchronously with the actor's internal state ([`Actor.with`])
 //! - convert from raw instance reference to Actor ([`Actor.from`])
 //! - allow panic inside a closure message
 //!
@@ -14,7 +14,7 @@
 //! This simple library doesn't support spawn actors across processes
 //!
 //! [`Actor.call`]: ./struct.Actor.html#method.call
-//! [`Actor.view`]: ./struct.Actor.html#method.view
+//! [`Actor.with`]: ./struct.Actor.html#method.with
 //! [`Actor.from`]: ./struct.Actor.html#method.from
 //!
 #![deny(missing_docs)]
@@ -23,12 +23,15 @@
 #[macro_use]
 extern crate may;
 
+#[doc(hidden)]
+extern crate may_waiter;
+
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
 use std::sync::{Arc, Weak};
 
 use may::sync::mpsc;
-use may::sync::Blocker;
+use may_waiter::Waiter;
 
 #[doc(hidden)]
 trait FnBox: Send {
@@ -71,17 +74,13 @@ impl<T> ActorImpl<T> {
     fn get_mut(&self) -> &mut T {
         unsafe { &mut *self.data.get() }
     }
-
-    fn get_ref(&self) -> &T {
-        unsafe { &*self.data.get() }
-    }
 }
 
 /// coroutine based Actor.
 ///
 /// The type `Actor<T>` wraps `T` into an Actor.
-/// You can send messages to the actor by calling it's [`call`] method.
-/// You can view the actor internal state by calling it's [`view`] method.
+/// You can send message to the actor by calling it's [`call`] method.
+/// You can run a closure synchronously with the actor internal state by calling it's [`with`] method.
 ///
 /// # Examples
 ///
@@ -90,11 +89,11 @@ impl<T> ActorImpl<T> {
 ///
 /// let a = Actor::new(40);
 /// a.call(|me| *me += 2);
-/// a.view(|me| assert_eq!(*me, 42));
+/// a.with(|me| assert_eq!(*me, 42));
 /// ```
 ///
 /// [`call`]: ./struct.Actor.html#method.call
-/// [`view`]: ./struct.Actor.html#method.view
+/// [`with`]: ./struct.Actor.html#method.with
 #[derive(Debug)]
 pub struct Actor<T> {
     inner: Arc<ActorImpl<T>>,
@@ -192,41 +191,34 @@ impl<T> Actor<T> {
         self.inner.tx.send(Box::new(f)).unwrap();
     }
 
-    /// view the actor internal states by a closure.
+    /// execute a closure in the actor's coroutine context
+    /// and wait for the result.
     ///
-    /// the closure would get a `&T` as parameter,
-    /// so that you can access its internal state but not change it.
-    ///
-    /// this function would block until the view done
-    pub fn view<F>(&self, f: F)
+    /// This is a sync version of `call` method, it will
+    /// block until finished, panic will be propogate to the
+    /// caller's context.
+    /// You can use this method to monitor the internal state
+    pub fn with<R, F>(&self, f: F) -> R
     where
-        F: FnOnce(&T),
+        F: FnOnce(&mut T) -> R + Send + 'static,
+        T: Send + 'static,
+        R: Send + 'static,
     {
-        let blocker = Blocker::current();
-        let (tx, rx) = mpsc::channel();
-
+        let waiter = Arc::new(Waiter::new());
         {
-            let blocker = blocker.clone();
-
-            // this is only a blocker that hold the message processing
-            let viewer = move || {
-                // signal the viewer to start processing
-                blocker.unpark();
-                // wait until the viewer processing done
-                let _ = rx.recv().unwrap();
+            let waiter = waiter.clone();
+            let actor = self.inner.clone();
+            let f = move || {
+                let data = actor.get_mut();
+                // signal the caller to after processing
+                waiter.set_rsp(f(data))
             };
 
-            self.inner.tx.send(Box::new(viewer)).unwrap();
+            self.inner.tx.send(Box::new(f)).unwrap();
         }
 
         // wait until the viewer pause the message processing
-        blocker.park(None).unwrap();
-
-        let data = self.inner.get_ref();
-        f(data);
-
-        // after view the data, unblock the message processing
-        tx.send(()).unwrap();
+        waiter.wait_rsp(None).unwrap()
     }
 }
 
@@ -253,17 +245,19 @@ impl<T> DriverActor<T> {
         actor.call(f);
     }
 
-    /// same as Actor.view
-    pub fn view<F>(&self, f: F)
+    /// same as Actor.with
+    pub fn with<R, F>(&self, f: F)
     where
-        F: FnOnce(&T),
+        F: FnOnce(&mut T) -> R + Send + 'static,
+        T: Send + 'static,
+        R: Send + 'static,
     {
         // if the actor is gone, cancel the current coroutine
         let actor = match self.inner.upgrade() {
             None => may::coroutine::trigger_cancel_panic(),
             Some(inner) => Actor { inner },
         };
-        actor.view(f);
+        actor.with(f);
     }
 }
 
@@ -278,8 +272,8 @@ mod tests {
         a.call(|me| *me += 2);
         a.call(|_me| panic!("support panic inside"));
         a.call(|me| *me += 4);
-        // the view would wait previous messages process done
-        a.view(|me| assert_eq!(*me, 6));
+        // the with mothod would wait previous messages process done
+        a.with(|me| assert_eq!(*me, 6));
     }
 
     #[test]
@@ -329,8 +323,8 @@ mod tests {
         // wait the message process finish
         rx.recv().unwrap();
 
-        ping.view(|me| assert_eq!(me.count, 11));
-        pong.view(|me| assert_eq!(me.count, 11));
+        ping.with(|me| assert_eq!(me.count, 11));
+        pong.with(|me| assert_eq!(me.count, 11));
     }
 
     #[test]

@@ -26,8 +26,8 @@ fn main() {
         me.0 = 10;
         println!("hello world");
     });
-    // the view would wait previous messages process done
-    a.view(|me| println!("actor value is {}", me.0));
+    // the with would wait previous messages process done
+    a.with(|me| println!("actor value is {}", me.0));
 }
 ```
 
@@ -37,11 +37,11 @@ for a detailed example, please see [pi.rs](examples/pi.rs)
 
 - send message via closure (`Actor.call`)
 
-You can send messages to the actor with the `call` API. It accepts a closure that has the `&mut T` as parameter, so that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure by a coroutine that associate with it. This API would not block user’s execution and would return immediately.
+You can send messages to the actor with the `call` API. It accepts a closure that has the `&mut T` as parameter, so that you can change it’s internal state. The closure would be send to a queue inside the actor, and the actor would execute the closure asynchronously by a coroutine that associate with it . This API would not block user’s execution and would return immediately. if panic happens in the closure, it will be caught and ignored in actor's coroutine context.
 
-- view actor internal state via closure (`Actor.view`)
+- synchronously run a closure within actor coroutine context (`Actor.with`)
 
-You can also view the actor's internal state by the `view` API. It accepts a closure that has the `&T` as parameter, so that you can access the state without modify permission. The closure would be executed by the associated coroutine if there are no other pending messages. And it will block until the closure returns. So during the view stage, you are guaranteed that no others are modifying the actor.
+You can also synchronously manipulate the actor's internal state by the `with` API. It accepts a closure that has the `&mut T` as parameter, so that you can view or modify actor's internal state. The closure would be executed by the associated coroutine if there are no other pending messages. And it will block until the closure returns the result to caller. If any panic happens in the closure, it will propagate to the caller's context
 
 - convert from raw instance reference to Actor (`Actor.from`)
 

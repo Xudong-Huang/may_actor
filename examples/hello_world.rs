@@ -10,5 +10,5 @@ fn main() {
         println!("hello world");
     });
     // the view would wait previous messages process done
-    a.view(|me| println!("actor value is {}", me.0));
+    a.with(|me| println!("actor value is {}", me.0));
 }
