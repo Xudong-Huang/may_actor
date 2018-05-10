@@ -271,7 +271,7 @@ impl<T> DriverActor<T> {
     }
 
     /// same as Actor.with
-    pub fn with<R, F>(&self, f: F)
+    pub fn with<R, F>(&self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R + Send,
         T: Send,
@@ -282,7 +282,7 @@ impl<T> DriverActor<T> {
             None => may::coroutine::trigger_cancel_panic(),
             Some(inner) => Actor { inner },
         };
-        actor.with(f);
+        actor.with(f)
     }
 }
 
