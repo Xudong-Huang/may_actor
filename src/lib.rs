@@ -145,7 +145,7 @@ impl<T> Actor<T> {
             // when all the actor instances dropped, cancel the driver
             unsafe { driver.coroutine().cancel() };
             driver.join().ok();
-            println!("actor coroutine done");
+            // info!("actor coroutine done");
         });
 
         actor
@@ -244,6 +244,16 @@ impl<T> Actor<T> {
             // cancel happened, we do nothing here
             Err(_) => may::coroutine::trigger_cancel_panic(),
         }
+    }
+
+    /// get the heap address as key, unique for each actor
+    /// can be used to compare if two actors are the same
+    pub fn key(&self) -> usize {
+        let inner = self.inner.clone();
+        let addr = Arc::into_raw(inner);
+        let key = addr as usize;
+        unsafe { Arc::from_raw(addr) };
+        key
     }
 }
 
@@ -405,5 +415,13 @@ mod tests {
     fn with_panic() {
         let a = Actor::new(0);
         a.with(|_| panic!("painic inside"));
+    }
+
+    #[test]
+    fn test_key() {
+        let a = Actor::new(0);
+        let b = a.clone();
+        // b.with(|_| println!("key = {}", a.key()));
+        assert_eq!(a.key(), b.key());
     }
 }
