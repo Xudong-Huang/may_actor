@@ -9,6 +9,7 @@ const TOTAL_NUM: usize = 100_000_000;
 const WORK_LOAD: usize = 10000;
 const ACTOR_NUMBER: usize = 100;
 
+#[inline]
 fn pow_of_minus_one(pow: usize) -> f64 {
     if pow & 1 != 0 {
         -1.0
@@ -17,10 +18,13 @@ fn pow_of_minus_one(pow: usize) -> f64 {
     }
 }
 
+#[inline]
 fn calc_work(start: usize, end: usize) -> f64 {
     let mut sum = 0.0;
+    let mut divisor = 2 * start + 1;
     for i in start..end {
-        sum += pow_of_minus_one(i) / (2.0 * i as f64 + 1.0)
+        sum += pow_of_minus_one(i) / divisor as f64;
+        divisor += 2;
     }
     sum
 }
