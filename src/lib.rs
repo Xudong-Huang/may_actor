@@ -19,34 +19,20 @@
 //!
 #![deny(missing_docs)]
 
-#[doc(hidden)]
-#[macro_use]
-extern crate may;
-
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 
+use may::go;
 use may::sync::{mpsc, AtomicOption, Blocker};
-
-#[doc(hidden)]
-trait FnBox: Send {
-    fn call_box(self: Box<Self>);
-}
-
-impl<F: FnOnce() + Send> FnBox for F {
-    fn call_box(self: Box<Self>) {
-        (*self)()
-    }
-}
 
 // we must use repr(C) to fix the mem layout
 #[repr(C)]
 #[derive(Debug)]
 struct ActorImpl<T> {
     data: UnsafeCell<T>,
-    tx: mpsc::Sender<Box<FnBox>>,
+    tx: mpsc::Sender<Box<dyn FnOnce() + Send>>,
 }
 
 unsafe impl<T: Send> Sync for ActorImpl<T> {}
@@ -54,22 +40,24 @@ impl<T> RefUnwindSafe for ActorImpl<T> {}
 
 impl<T> ActorImpl<T> {
     fn new(data: T) -> Self {
-        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
+        let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
         // when all tx are dropped, the coroutine would exit
         go!(move || for f in rx.into_iter() {
             panic::catch_unwind(panic::AssertUnwindSafe(move || {
-                f.call_box();
-            })).ok();
+                f();
+            }))
+            .ok();
         });
 
         ActorImpl {
             data: UnsafeCell::new(data),
-            tx: tx,
+            tx,
         }
     }
 
-    fn get_mut(&self) -> &mut T {
-        unsafe { &mut *self.data.get() }
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn get_mut(&self) -> &mut T {
+        &mut *self.data.get()
     }
 }
 
@@ -114,7 +102,7 @@ impl<T> Actor<T> {
         }
     }
 
-    /// create an actor with a driver coroutine running in backgroud
+    /// create an actor with a driver coroutine running in background
     /// when all actor instances got dropped, the driver coroutine
     /// would be cancelled
     pub fn drive_new<F>(data: T, f: F) -> Self
@@ -122,16 +110,16 @@ impl<T> Actor<T> {
         F: FnOnce(DriverActor<T>) + Send + 'static,
         T: Send + 'static,
     {
-        let (tx, rx) = mpsc::channel::<Box<FnBox>>();
+        let (tx, rx) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
 
         let actor = Actor {
             inner: Arc::new(ActorImpl {
                 data: UnsafeCell::new(data),
-                tx: tx,
+                tx,
             }),
         };
 
-        // create the back groud driver
+        // create the back ground driver
         let driver_para = Arc::downgrade(&actor.inner);
         let driver = go!(|| f(DriverActor { inner: driver_para }));
 
@@ -139,8 +127,9 @@ impl<T> Actor<T> {
         go!(move || {
             for f in rx.into_iter() {
                 panic::catch_unwind(panic::AssertUnwindSafe(move || {
-                    f.call_box();
-                })).ok();
+                    f();
+                }))
+                .ok();
             }
             // when all the actor instances dropped, cancel the driver
             unsafe { driver.coroutine().cancel() };
@@ -181,7 +170,7 @@ impl<T> Actor<T> {
     {
         let actor = self.inner.clone();
         let f = move || {
-            let data = actor.get_mut();
+            let data = unsafe { actor.get_mut() };
             f(data);
         };
 
@@ -192,7 +181,7 @@ impl<T> Actor<T> {
     /// and wait for the result.
     ///
     /// This is a sync version of `call` method, it will
-    /// block until finished, panic will be propogate to the
+    /// block until finished, panic will be propagate to the
     /// caller's context.
     /// You can use this method to monitor the internal state
     pub fn with<R, F>(&self, f: F) -> R
@@ -212,7 +201,8 @@ impl<T> Actor<T> {
             let actor = self.inner.clone();
 
             let f = move || {
-                let exit = panic::catch_unwind(panic::AssertUnwindSafe(|| f(actor.get_mut())));
+                let data = unsafe { actor.get_mut() };
+                let exit = panic::catch_unwind(panic::AssertUnwindSafe(|| f(data)));
                 match exit {
                     Ok(r) => {
                         ret.swap(r, Ordering::Relaxed);
@@ -224,9 +214,10 @@ impl<T> Actor<T> {
                 blocker.unpark();
             };
 
-            let closure: Box<FnBox> = Box::new(f);
+            let closure: Box<dyn FnOnce() + Send> = Box::new(f);
             // erase the lifetime of boxed closure
-            let closure: Box<FnBox + 'static> = unsafe { std::mem::transmute(closure) };
+            let closure: Box<dyn FnOnce() + Send + 'static> =
+                unsafe { std::mem::transmute(closure) };
 
             self.inner.tx.send(closure).unwrap();
         }
@@ -307,7 +298,7 @@ mod tests {
         a.call(|me| *me += 2);
         a.call(|_me| panic!("support panic inside"));
         a.call(|me| *me += 4);
-        // the with mothod would wait previous messages process done
+        // the with method would wait previous messages process done
         a.with(|me| assert_eq!(*me, 6));
     }
 
@@ -347,7 +338,7 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
 
-        let ping = Actor::new(Ping { count: 0, tx: tx });
+        let ping = Actor::new(Ping { count: 0, tx });
         let pong = Actor::new(Pong { count: 0 });
 
         {
@@ -414,7 +405,7 @@ mod tests {
     #[should_panic]
     fn with_panic() {
         let a = Actor::new(0);
-        a.with(|_| panic!("painic inside"));
+        a.with(|_| panic!("panic inside"));
     }
 
     #[test]

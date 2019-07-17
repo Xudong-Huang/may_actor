@@ -1,4 +1,3 @@
-extern crate may_actor;
 use may_actor::Actor;
 
 fn main() {

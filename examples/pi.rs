@@ -1,7 +1,4 @@
-#[macro_use]
-extern crate may;
-extern crate may_actor;
-
+use may::go;
 use may::sync::mpsc;
 use may_actor::Actor;
 
