@@ -205,10 +205,10 @@ impl<T> Actor<T> {
                 let exit = panic::catch_unwind(panic::AssertUnwindSafe(|| f(data)));
                 match exit {
                     Ok(r) => {
-                        ret.swap(r, Ordering::Relaxed);
+                        ret.swap(Box::new(r), Ordering::Relaxed);
                     }
                     Err(e) => {
-                        err.swap(e, Ordering::Relaxed);
+                        err.swap(Box::new(e), Ordering::Relaxed);
                     }
                 }
                 blocker.unpark();
@@ -225,7 +225,7 @@ impl<T> Actor<T> {
         // wait until the viewer pause the message processing
         match blocker.park(None) {
             Ok(_) => match ret.take(Ordering::Relaxed) {
-                Some(v) => v,
+                Some(v) => *v,
                 None => match err.take(Ordering::Relaxed) {
                     Some(panic) => panic::resume_unwind(panic),
                     None => unreachable!("failed to get result"),
@@ -307,11 +307,11 @@ mod tests {
         struct Ping {
             count: u32,
             tx: mpsc::Sender<()>,
-        };
+        }
 
         struct Pong {
             count: u32,
-        };
+        }
 
         impl Ping {
             fn ping(&mut self, to: Actor<Pong>) {
