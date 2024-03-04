@@ -21,7 +21,6 @@
 
 use std::cell::UnsafeCell;
 use std::panic::{self, RefUnwindSafe};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Weak};
 
 use may::go;
@@ -205,10 +204,10 @@ impl<T> Actor<T> {
                 let exit = panic::catch_unwind(panic::AssertUnwindSafe(|| f(data)));
                 match exit {
                     Ok(r) => {
-                        ret.swap(Box::new(r), Ordering::Relaxed);
+                        ret.store(Box::new(r));
                     }
                     Err(e) => {
-                        err.swap(Box::new(e), Ordering::Relaxed);
+                        err.store(Box::new(e));
                     }
                 }
                 blocker.unpark();
@@ -224,9 +223,9 @@ impl<T> Actor<T> {
 
         // wait until the viewer pause the message processing
         match blocker.park(None) {
-            Ok(_) => match ret.take(Ordering::Relaxed) {
+            Ok(_) => match ret.take() {
                 Some(v) => *v,
-                None => match err.take(Ordering::Relaxed) {
+                None => match err.take() {
                     Some(panic) => panic::resume_unwind(panic),
                     None => unreachable!("failed to get result"),
                 },
