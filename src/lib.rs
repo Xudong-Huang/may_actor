@@ -377,7 +377,7 @@ mod tests {
                 *v += 1;
                 println!("new_value = {}", *v)
             });
-            assert_eq!(drop_flag.flag.load(Ordering::Relaxed), false);
+            assert!(!drop_flag.flag.load(Ordering::Relaxed));
             may::coroutine::sleep(Duration::from_secs(1));
         });
 
@@ -385,7 +385,7 @@ mod tests {
         drop(actor);
         // wait some time for the driver coroutine exit
         may::coroutine::sleep(Duration::from_millis(100));
-        assert_eq!(flag.load(Ordering::Relaxed), true);
+        assert!(flag.load(Ordering::Relaxed));
     }
 
     #[test]
